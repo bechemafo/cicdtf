@@ -13,7 +13,7 @@ stages:
   - destroy
 
 variables:
-  TF_ROOT: "adv-tf-cicd"                 # folder containing your .tf files, relative to repo root
+  TF_ROOT: "."                 # folder containing your .tf files, relative to repo root
   TF_IN_AUTOMATION: "true"     # cleaner Terraform output for CI
   TF_INPUT: "false"            # never prompt for input
 
