@@ -1,8 +1,4 @@
-
-variable "sg" {
-  
+variable "sg" {  
 }
-
-variable "sn" {
-  
+variable "sn" {  
 }

@@ -1,5 +1,4 @@
 #1 vpc, 1 subnet and 1 SG
-
 resource "aws_vpc" "myvpc" {
     cidr_block = "10.0.0.0/16"
     enable_dns_hostnames = true
@@ -15,11 +14,9 @@ resource "aws_subnet" "pub_sn" {
     cidr_block = "10.0.1.0/24"
     map_public_ip_on_launch = true
     availability_zone = "us-east-1a"
-
     tags = {
       Name = "pb_sn1"
     }
-  
 }
 
 resource "aws_security_group" "sg" {
@@ -32,7 +29,6 @@ resource "aws_security_group" "sg" {
         to_port = 22
         protocol = "tcp"
         cidr_blocks = ["0.0.0.0/0"]
-
     }
 
     egress  {
