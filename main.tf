@@ -1,12 +1,12 @@
 
 module "vpc" {
-    source = "./vpc"
-  
+  source = "./vpc"
+
 }
 
 module "ec2" {
-    source = "./web"
-    sn = module.vpc.pub_sn
-    sg = module.vpc.sg
-  
+  source = "./web"
+  sn     = module.vpc.pub_sn
+  sg     = module.vpc.sg
+
 }
