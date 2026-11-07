@@ -1,0 +1,112 @@
+# .gitlab-ci.yml — Terraform on AWS
+#
+# Required CI/CD variables (Settings → CI/CD → Variables, masked + protected):
+#   AWS_ACCESS_KEY_ID
+#   AWS_SECRET_ACCESS_KEY
+#   AWS_DEFAULT_REGION      e.g. us-east-1
+# (Or use OIDC instead of static keys — see the commented block at the bottom.)
+
+stages:
+  - validate
+  - plan
+  - apply
+  - destroy
+
+variables:
+  TF_ROOT: "adv-tf-cicd"                 # folder containing your .tf files, relative to repo root
+  TF_IN_AUTOMATION: "true"     # cleaner Terraform output for CI
+  TF_INPUT: "false"            # never prompt for input
+
+# Run pipelines for merge requests and branch pushes, without duplicate
+# pipelines when a branch already has an open MR.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+default:
+  image:
+    name: hashicorp/terraform:6.72.0   # pin a version (e.g. hashicorp/terraform:1.x.y) for reproducible runs
+    entrypoint: [""]
+  before_script:
+    - cd "$TF_ROOT"
+    - terraform version
+  cache:
+    key:
+      files:
+        - $TF_ROOT/.terraform.lock.hcl
+    paths:
+      - $TF_ROOT/.terraform/providers
+
+# ---------- VALIDATE ----------
+fmt:
+  stage: validate
+  script:
+    - terraform fmt -check -recursive -diff
+
+validate:
+  stage: validate
+  script:
+    - terraform init -backend=false
+    - terraform validate
+
+# ---------- PLAN ----------
+plan:
+  stage: plan
+  needs: [fmt, validate]
+  resource_group: terraform          # serialise jobs that touch state
+  script:
+    - terraform init
+    - terraform plan -out=tfplan
+  artifacts:
+    name: tfplan
+    paths:
+      - $TF_ROOT/tfplan
+    expire_in: 1 week
+    access: developer                # plan files can contain secrets
+
+# ---------- APPLY ----------
+apply:
+  stage: apply
+  needs: [plan]
+  resource_group: terraform
+  environment:
+    name: production
+  script:
+    - terraform init
+    - terraform apply tfplan
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual                   # click ▶ to apply after reviewing the plan
+
+# ---------- DESTROY ----------
+destroy:
+  stage: destroy
+  resource_group: terraform
+  environment:
+    name: production
+    action: stop
+  script:
+    - terraform init
+    - terraform destroy -auto-approve
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+
+# ---------- OPTIONAL: OIDC instead of static AWS keys ----------
+# 1. In AWS IAM, add an OIDC identity provider for https://gitlab.com
+#    and a role that trusts it (scope the trust to your project path).
+# 2. Add CI/CD variable AWS_ROLE_ARN, remove the access key variables.
+# 3. Replace the `default:` block's before_script with this, and add id_tokens:
+#
+# default:
+#   id_tokens:
+#     AWS_ID_TOKEN:
+#       aud: https://gitlab.com
+#   before_script:
+#     - echo "$AWS_ID_TOKEN" > /tmp/web_identity_token
+#     - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token
+#     - cd "$TF_ROOT"
+#     - terraform version
