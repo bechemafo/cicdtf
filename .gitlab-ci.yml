@@ -28,7 +28,7 @@ workflow:
 
 default:
   image:
-    name: hashicorp/terraform:6.72.0   # pin a version (e.g. hashicorp/terraform:1.x.y) for reproducible runs
+    name: hashicorp/terraform:latest  # pin a version (e.g. hashicorp/terraform:1.x.y) for reproducible runs
     entrypoint: [""]
   before_script:
     - cd "$TF_ROOT"
