@@ -1,0 +1,118 @@
+# .github/workflows/terraform.yml — Terraform on AWS via GitHub Actions
+#
+# Repo settings needed:
+#   Settings → Secrets and variables → Actions
+#     Secrets:   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+#     Variables: AWS_REGION            e.g. us-east-1
+#   Settings → Environments → New environment "production"
+#     → add yourself under "Required reviewers"  (this is the manual approval gate for apply/destroy)
+
+name: terraform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:            # "Run workflow" button in the Actions tab
+    inputs:
+      destroy:
+        description: "Destroy all infrastructure?"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:                    # one Terraform run at a time (protects state)
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_ROOT: "."                  # folder containing your .tf files
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+defaults:
+  run:
+    working-directory: .          # keep in sync with TF_ROOT (contexts aren't allowed here)
+
+jobs:
+  # ---------- VALIDATE ----------
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.x.y"     # match `terraform version` on your Mac
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  # ---------- PLAN ----------
+  plan:
+    needs: validate
+    if: ${{ !inputs.destroy }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.x.y"
+          terraform_wrapper: false
+      - run: terraform init
+      - run: terraform plan -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_ROOT }}/tfplan
+          retention-days: 7
+
+  # ---------- APPLY ----------
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment: production          # pauses here until a required reviewer approves
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.x.y"
+          terraform_wrapper: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.TF_ROOT }}
+      - run: terraform init
+      - run: terraform apply tfplan
+
+  # ---------- DESTROY ----------
+  destroy:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.destroy
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.x.y"
+          terraform_wrapper: false
+      - run: terraform init
+      - run: terraform destroy -auto-approve
+
+# ---------- OPTIONAL: OIDC instead of static AWS keys ----------
+# 1. In AWS IAM add OIDC provider https://token.actions.githubusercontent.com
+#    (audience sts.amazonaws.com) and a role trusting repo:bechemafo/<repo>:*
+# 2. Delete the AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env lines above.
+# 3. Add to top-level permissions:   id-token: write
+# 4. Add this step after checkout in plan/apply/destroy:
+#      - uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          role-to-assume: arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME>
+#          aws-region: ${{ vars.AWS_REGION }}
